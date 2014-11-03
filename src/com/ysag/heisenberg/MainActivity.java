@@ -35,6 +35,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
                 case LoaderCallbackInterface.SUCCESS:
                 {
                     Log.i(TAG, "OpenCV loaded successfully");
+                    System.loadLibrary("heisenberg");
                     mOpenCvCameraView.enableView();
                 } break;
                 default:
@@ -123,35 +124,40 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     private static final Scalar GREEN = new Scalar(0, 255, 0, 255);
 
     public Mat onCameraFrame(CvCameraViewFrame inputFrame) {
-        Mat gray = inputFrame.gray(),
-            rgba = inputFrame.rgba();
+        Mat rgba = inputFrame.rgba();
+        /* Mat gray = inputFrame.gray(), */
+        /*     rgba = inputFrame.rgba(); */
 
-        Imgproc.Canny(gray, gray, 50, 200, 3, false);
+        /* Imgproc.Canny(gray, gray, 50, 200, 3, false); */
 
-        Mat lines = new Mat();
-        Imgproc.HoughLinesP(gray, lines, 1, Math.PI / 180., 50, 50, 10);
+        /* Mat lines = new Mat(); */
+        /* Imgproc.HoughLinesP(gray, lines, 1, Math.PI / 180., 50, 50, 10); */
 
-        Log.d(TAG, "lines is of size: " + lines.rows() + "," + lines.cols() + "," + lines.channels());
+        /* Log.d(TAG, "lines is of size: " + lines.rows() + "," + lines.cols() + "," + lines.channels()); */
 
-        for (int i = 0; i < lines.cols(); i++) {
-            
-            double[] line = lines.get(0, i);
-            double x1 = line[0];
-            double y1 = line[1];
-            double x2 = line[2];
-            double y2 = line[3];
+        /* for (int i = 0; i < lines.cols(); i++) { */
+        /*      */
+        /*     double[] line = lines.get(0, i); */
+        /*     double x1 = line[0]; */
+        /*     double y1 = line[1]; */
+        /*     double x2 = line[2]; */
+        /*     double y2 = line[3]; */
 
-            Point pt1 = new Point(x1, y1),
-                  pt2 = new Point(x2, y2);
+        /*     Point pt1 = new Point(x1, y1), */
+        /*           pt2 = new Point(x2, y2); */
 
-            Core.line(rgba, pt1, pt2, GREEN);
-        }
+        /*     Core.line(rgba, pt1, pt2, GREEN); */
+        /* } */
 
         /* Imgproc.adaptiveThreshold(gray, gray, 255, */
         /*                           Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C, */
         /*                           Imgproc.THRESH_BINARY, */
         /*                           5, 0); */
+        findLines(rgba.getNativeObjAddr());
         return rgba;
     }
+
+    public native void findLines(long ptrRgba);
+
 }
 
