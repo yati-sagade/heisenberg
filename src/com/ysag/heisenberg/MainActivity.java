@@ -161,56 +161,24 @@ public class MainActivity extends Activity
     }
 
     private static final Scalar GREEN = new Scalar(0, 255, 0, 255);
+    private static final Scalar BLUE = new Scalar(255, 0, 0, 255);
+    private static final Scalar YELLOW = new Scalar(255, 255, 0, 255);
+    private static final Scalar RED = new Scalar(0, 0, 255, 255);
 
     public Mat onCameraFrame(CvCameraViewFrame inputFrame) {
         Mat gray = inputFrame.gray(),
             rgba = inputFrame.rgba();
-
-        /* Imgproc.Canny(gray, gray, 50, 200, 3, false); */
-
-        /* Mat lines = new Mat(); */
-        /* Imgproc.HoughLinesP(gray, lines, 1, Math.PI / 180., 50, 50, 10); */
-
-        /* Log.d(TAG, "lines is of size: " + lines.rows() + "," + lines.cols() + "," + lines.channels()); */
-
-        /* for (int i = 0; i < lines.cols(); i++) { */
-        /*      */
-        /*     double[] line = lines.get(0, i); */
-        /*     double x1 = line[0]; */
-        /*     double y1 = line[1]; */
-        /*     double x2 = line[2]; */
-        /*     double y2 = line[3]; */
-
-        /*     Point pt1 = new Point(x1, y1), */
-        /*           pt2 = new Point(x2, y2); */
-
-        /*     Core.line(rgba, pt1, pt2, GREEN); */
-        /* } */
-
-        /* Imgproc.adaptiveThreshold(gray, gray, 255, */
-        /*                           Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C, */
-        /*                           Imgproc.THRESH_BINARY, */
-        /*                           5, 0); */
         switch (this.state) {
         case UNINITIALIZED:
             drawRects(rgba);
             return rgba;
         case PALM_COLORS_OBTAINED:
-            Log.d(TAG, "Here in the case, about to call calculatePalmColorInfo()");
             calculatePalmColorInfo(rgba);
             return rgba;
         case INITIALIZED:
-            Log.d(TAG, "rgba: " + rgba.rows() + "," + rgba.cols() + "," + rgba.channels());
-            Imgproc.cvtColor(main(rgba), rgba, Imgproc.COLOR_GRAY2RGBA);
-            Imgproc.pyrUp(rgba, rgba);
-            Log.d(TAG, "rgba: " + rgba.rows() + "," + rgba.cols() + "," + rgba.channels());
-            return rgba;
+            return main(rgba);
         }
-        Log.d(TAG, "NO state is good!");
         return rgba;
-        /* findLines(gray.getNativeObjAddr(), thresholdValue); */
-        /* Log.d(TAG, "got result, returning"); */
-        /* return gray; */
     }
 
     private ROI[] rois = null;
@@ -239,15 +207,12 @@ public class MainActivity extends Activity
     };
 
     private void calculatePalmColorInfo(Mat rgba) {
-        Log.d(TAG, "in calculatePalmColorInfo()");
         Imgproc.cvtColor(rgba, rgba, Imgproc.COLOR_RGB2HLS);
         for (int i = 0; i < 7; ++i) {
-            Log.d(TAG, "Updating sample " + i);
             updateColorForSample(i, rgba);
         }
         Imgproc.cvtColor(rgba, rgba, Imgproc.COLOR_HLS2RGB);
         state = SystemState.INITIALIZED;
-        Log.d(TAG, "Returning fom calculatePalmColorInfo()");
     }
 
     private void updateColorForSample(int idx, Mat img) {
@@ -332,7 +297,6 @@ public class MainActivity extends Activity
 
             Mat tmp = new Mat();
             Core.inRange(img, lo, hi, tmp);
-            Log.d(TAG, "" + tmp.rows() + "," + tmp.cols() + "," + tmp.channels());
             Core.add(bw, tmp, bw);
         }
         Imgproc.medianBlur(bw, bw, 7);
@@ -341,15 +305,109 @@ public class MainActivity extends Activity
 
     
     private Mat main(Mat img) {
-        Log.d(TAG, "in main()");
         Mat down = new Mat();
         Imgproc.pyrDown(img, down);
         Imgproc.blur(down, down, new Size(3,3));
         Imgproc.cvtColor(down, down, Imgproc.COLOR_RGB2HLS);
-        return binarize(down); 
-        // Imgproc.cvtColor(down, down, Imgproc.COLOR_HLS2RGB);
+        Mat bin = binarize(down);
+        Mat ret = new Mat();
+        Imgproc.pyrUp(bin, ret);
+        Imgproc.Canny(ret, ret, 100, 200, 3, false);
+        List<MatOfPoint> contours = new ArrayList<MatOfPoint>();
+        Mat hierarchy = new Mat();
+        Imgproc.findContours(ret, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
+        int theIdx = biggestContourIndex(contours);
+        if (theIdx >= 0) {
+            Imgproc.drawContours(img, contours, theIdx, GREEN, 3);
+            MatOfInt convexHull = new MatOfInt();
+            MatOfPoint handContour = contours.get(theIdx);
+            Imgproc.convexHull(handContour, convexHull);
+            MatOfInt4 convexityDefects = new MatOfInt4();
+            Imgproc.convexityDefects(handContour, convexHull, convexityDefects);
 
+            Rect boundingRect = Imgproc.boundingRect(handContour);
+
+            for (int i = 0; i < convexityDefects.rows(); ++i) {
+                int[] data = new int[4];
+                convexityDefects.get(i, 0, data);
+
+                Point startPoint = getPoint(handContour, data[0]),
+                      endPoint = getPoint(handContour, data[1]),
+                      farPoint = getPoint(handContour, data[2]);
+
+                if (isSignificantDefect(startPoint, endPoint, farPoint, boundingRect)) {
+                    Core.circle(img, startPoint, 3, BLUE, -1);
+                    Core.circle(img, endPoint, 3, YELLOW, -1);
+                    Core.circle(img, farPoint, 3, RED, -1);
+                }
+            }
+        }
+        
+        return img;
     }
+
+    private static Point getPoint(MatOfPoint points, int idx) {
+        int[] point = new int[2];
+        points.get(idx, 0, point);
+        return new Point(point[0], point[1]);
+    }
+
+    private static double dist(Point p1, Point p2) { 
+        double t1 = p2.x - p1.x,
+               t2 = p2.y - p1.y;
+        
+        return Math.sqrt(t1 * t1 + t2 * t2);
+    }
+
+    private static double angle(Point a, Point elbow, Point c) {
+        double l1 = dist(a, elbow),
+               l2 = dist(elbow, c);
+        
+        double dot = (a.x - elbow.x) * (c.x - elbow.x) +
+                     (a.y - elbow.y) * (c.y - elbow.y);
+
+        double angle = Math.acos(dot / (l1 * l2));
+        angle *= (180.0 / Math.PI);
+        return angle;
+    }
+
+    private boolean isSignificantDefect(Point start, Point end, Point far, Rect boundingRect) {
+        double tolerance = boundingRect.height / 5.0;
+        double angleTolerance = 95.0;
+        
+        if (dist(start, far) > tolerance &&
+            dist(end, far) > tolerance &&
+            angle(start, far, end) < angleTolerance)
+        {
+            double d = boundingRect.y + 3 * boundingRect.height / 4;
+            if (end.y <= d && start.y <= d) {
+                return true;
+            }
+        } 
+        return false;
+    }
+
+
+    private static Point pointFromArray(int[] arr) {
+        return new Point(arr[0], arr[1]);
+    }
+
+    private int biggestContourIndex(List<MatOfPoint> contours) {
+        int maxsize = 0;
+        int maxidx = -1;
+        for (int i = 0; i < contours.size(); ++i) {
+            MatOfPoint contour = contours.get(i);
+            // A MatOfPoint of n points is stored as a n x 1 matrix, with
+            // each entry M(i,j) corresponding to two channels, which are
+            // the X and Y values of the Point.
+            if (contour.rows() > maxsize) {
+                maxsize = contour.rows();
+                maxidx = i;
+            }
+        }
+        return maxidx;
+    }
+
 
     private int clamp(int value) { 
         return clamp(value, 0, 255);
@@ -363,6 +421,19 @@ public class MainActivity extends Activity
             return lo;
         }
         return value;
+    }
+
+    public static int randInt(int min, int max) {
+
+        // NOTE: Usually this should be a field rather than a method
+        // variable so that it is not re-seeded every call.
+        Random rand = new Random();
+
+        // nextInt is normally exclusive of the top value,
+        // so add 1 to make it inclusive
+        int randomNum = rand.nextInt((max - min) + 1) + min;
+
+        return randomNum;
     }
 }
 
